@@ -61,8 +61,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• <code>/delrole НазваниеРоли</code> — снять роль\n"
         "• <code>/roles</code> — посмотреть список всех ролей\n"
         "• <code>/myroles</code> — посмотреть свои роли\n\n"
-        "🔥 <b>Вызов:</b> просто напиши слэш и название роли, а дальше твой текст, например:\n"
-        "<code>/отгрузка деталь такая-то, денег столько</code>"
+        "🔥 <b>Вызов:</b> начни сообщение с восклицательного знака и названия роли, например:\n"
+        "<code>!отгрузка деталь такая-то, денег столько</code>"
     )
 
 async def set_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -143,37 +143,41 @@ async def list_roles(update: Update, context: ContextTypes.DEFAULT_TYPE):
     roles_list = "\n• ".join(user_roles.keys())
     await update.effective_chat.send_message(f"📋 <b>Список всех ролей в группе:</b>\n• {roles_list}", parse_mode="HTML")
 
-# Универсальный перехват любых команд через слэш (например /отгрузка, /дизайнер и т.д.)
-async def handle_slash_call(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Перехват сообщений, начинающихся с восклицательного знака (!)
+async def handle_exclamation_call(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
 
     text = update.message.text.strip()
-    if not text.startswith("/"):
+    
+    # Проверяем, начинается ли сообщение с !
+    if not text.startswith("!"):
         return
 
-    # Убираем слэш и разделяем команду и текст
-    # Например: "/отгрузка деталь такая" превратится в команду "отгрузка" и текст "деталь такая"
-    command_parts = text[1:].split(maxsplit=1)
-    if not command_parts:
+    # Убираем восклицательный знак и разделяем роль и текст
+    # Например "!отгрузка деталь такая" -> роль "отгрузка", текст "деталь такая"
+    text_without_excl = text[1:]
+    text_parts = text_without_excl.split(maxsplit=1)
+    
+    if not text_parts:
         return
 
-    potential_role = command_parts[0].lower()
+    potential_role = text_parts[0].lower()
 
-    # Проверяем, есть ли такая роль в нашей базе
+    # Проверяем, есть ли такая роль в нашей базе данных
     if potential_role in user_roles:
         users = user_roles[potential_role]
         if not users:
             return
 
-        # Удаляем сообщение пользователя с вызовом
+        # Удаляем сообщение пользователя
         try:
             await update.message.delete()
         except Exception:
             pass
 
         mentions = [user_names[uid] for uid in users if uid in user_names]
-        custom_text = command_parts[1] if len(command_parts) > 1 else ""
+        custom_text = text_parts[1] if len(text_parts) > 1 else ""
 
         response_text = f"🔔 <b>Вызов участников с ролью [{potential_role}]:</b>\n" + " ".join(mentions)
         if custom_text:
@@ -190,7 +194,7 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("myroles", my_roles))
     app.add_handler(CommandHandler("roles", list_roles))
     
-    # Перехватывает любые команды через слэш и проверяет их по списку ролей
-    app.add_handler(MessageHandler(filters.COMMAND, handle_slash_call))
+    # Перехватывает любые сообщения, начинающиеся с !
+    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_exclamation_call))
 
     app.run_polling()
