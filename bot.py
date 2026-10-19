@@ -2,11 +2,16 @@ import asyncio
 import json
 import logging
 import os
-from telegram import Update
+from telegram import (
+    Update,
+    InlineQueryResultArticle,
+    InputTextMessageContent,
+)
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
+    InlineQueryHandler,
     filters,
     ContextTypes,
 )
@@ -19,7 +24,6 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# Функции для работы с файлом данных ролей
 def load_data():
     if os.path.exists(DATA_FILE):
         try:
@@ -60,8 +64,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• <code>/delrole отгрузка</code> — снять роль\n"
         "• <code>/roles</code> — список всех ролей\n"
         "• <code>/myroles</code> — твои роли\n\n"
-        "⚡️ <b>Быстрый вызов (твое сообщение остается в чате):</b>\n"
-        "<code>!отгрузка деталь такая-то</code>"
+        "⚡️ <b>Как вызывать через меню (Инлайн-режим):</b>\n"
+        "Напиши в чате <code>@ИмяТвоегоБота</code> и появится список ролей для выбора!"
     )
 
 async def set_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -152,19 +156,49 @@ async def list_roles(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.effective_chat.send_message(f"📋 <b>Роли в группе:</b>\n• {roles_list}", parse_mode="HTML")
     asyncio.create_task(delete_later(msg, 8))
 
-# МОЛНИЕНОСНЫЙ ВЫЗОВ (Ваше сообщение НЕ удаляется)
+# ОБРАБОТЧИК ИНЛАЙН-МЕНЮ (Когда пишут @ИмяБота)
+async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.inline_query.query.strip().lower()
+    results = []
+
+    for role, users in user_roles.items():
+        # Если пользователь что-то вводит после имени бота, фильтруем роли
+        if query and query not in role:
+            continue
+
+        valid_users = [uid for uid in users if uid in user_names]
+        if not valid_users:
+            continue
+
+        mentions = [user_names[uid] for uid in valid_users]
+        mentions_str = " ".join(mentions)
+
+        response_text = f"🔔 <b>Вызов участников с ролью [{role}]:</b>\n{mentions_str}"
+
+        results.append(
+            InlineQueryResultArticle(
+                id=role,
+                title=f"Роль: {role}",
+                description=f"Участников: {len(valid_users)}",
+                input_message_content=InputTextMessageContent(
+                    response_text, parse_mode="HTML"
+                )
+            )
+        )
+
+    await update.inline_query.answer(results, cache_time=1)
+
+# Обычный текстовый вызов через @роль (как мы делали до этого)
 async def quick_call_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
 
     text = update.message.text.strip()
-    
-    if not text.startswith("!"):
+    if not text.startswith("@"):
         return
 
     clean_text = text[1:]
     parts = clean_text.split(maxsplit=1)
-    
     if not parts:
         return
 
@@ -175,7 +209,6 @@ async def quick_call_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not users:
         return
 
-    # Твое сообщение НЕ удаляем! Сразу собираем и отправляем ответ:
     mentions = [user_names[uid] for uid in users if uid in user_names]
     
     response_text = f"🔔 <b>Вызов участников с ролью [{role}]:</b>\n" + " ".join(mentions)
@@ -193,6 +226,8 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("myroles", my_roles))
     app.add_handler(CommandHandler("roles", list_roles))
     
+    # Подключаем инлайн-меню и быстрый вызов через @
+    app.add_handler(InlineQueryHandler(inline_query_handler))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), quick_call_handler))
 
     app.run_polling()
