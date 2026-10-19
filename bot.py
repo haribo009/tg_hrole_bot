@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import subprocess
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -40,8 +41,17 @@ def save_data():
         }
         with open(DATA_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+            
+        # Автоматический коммит и пуш в Git, чтобы роли сохранялись навсегда
+        subprocess.run(["git", "config", "--global", "user.name", "RoleBot"], capture_output=True)
+        subprocess.run(["git", "config", "--global", "user.email", "bot@action.github.com"], capture_output=True)
+        subprocess.run(["git", "add", DATA_FILE], capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Auto-update roles data [skip ci]"], capture_output=True)
+        push_result = subprocess.run(["git", "push"], capture_output=True, text=True)
+        logging.info(f"Git push result: {push_result.stdout}")
+        
     except Exception as e:
-        logging.error(f"Ошибка сохранения файла: {e}")
+        logging.error(f"Ошибка сохранения/пуша данных: {e}")
 
 user_roles, user_names = load_data()
 
@@ -83,7 +93,7 @@ async def set_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tag_name = f'<a href="tg://user?id={user.id}">{first_name}</a>'
         
     user_names[user.id] = tag_name
-    save_data()
+    save_data() # Сохранит локально и сразу отправит в Git!
 
     msg = await update.message.reply_html(f"✅ Роль <b>{role}</b> успешно закреплена за тобой!")
     asyncio.create_task(delete_later(msg, 3))
@@ -101,7 +111,7 @@ async def del_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_roles[role].remove(user.id)
         if not user_roles[role]:
             del user_roles[role]
-        save_data()
+        save_data() # Обновит и запушит в Git
         msg = await update.message.reply_html(f"❌ Роль <b>{role}</b> снята.")
     else:
         msg = await update.message.reply_html(f"У тебя нет роли <b>{role}</b>.")
@@ -148,8 +158,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         users = user_roles.get(role, set())
 
         if not users:
-            msg = await query.effective_chat.send_message(f"В роли <b>{role}</b> никого нет.", parse_mode="HTML")
-            asyncio.create_task(delete_later(msg, 3))
+            msg = await query.effective_chat.send_message(f"В роли <b>{role}</b> никого нет.", parse_mode="HTML")                asyncio.create_task(delete_later(msg, 3))
             return
 
         mentions = [user_names[uid] for uid in users if uid in user_names]
