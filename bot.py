@@ -1,8 +1,4 @@
-import asyncio
-import json
 import logging
-import os
-import subprocess
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
