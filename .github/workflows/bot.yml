@@ -4,20 +4,23 @@ on:
   push:
     branches: [ main, master ]
   schedule:
-    - cron: '*/30 * * * *' # Запуск каждые 30 минут, чтобы бот не засыпал
+    - cron: '*/30 * * * *'
   workflow_dispatch:
+
+# ВАЖНО: Разрешаем воркфлоу делать push и изменять файлы в репозитории
+permissions:
+  contents: write
 
 jobs:
   run-bot:
-  
     runs-on: ubuntu-latest
 
     steps:
-    # Обновлено до v4, чтобы работать на свежем Node.js
     - name: Checkout repository
       uses: actions/checkout@v4
+      with:
+        persist-credentials: true
 
-    # Обновлено до v5
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
