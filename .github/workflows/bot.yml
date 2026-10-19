@@ -1,36 +1,33 @@
-name: Telegram Bot Worker
+name: Run Telegram Bot
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ main, master ]
   schedule:
-    - cron: '0 */5 * * *'
+    - cron: '*/30 * * * *' # Запуск каждые 30 минут, чтобы бот не засыпал
   workflow_dispatch:
 
 jobs:
   run-bot:
+  
     runs-on: ubuntu-latest
-    
-    # ВАЖНО: Добавляем права на запись в репозиторий
-    permissions:
-      contents: write
 
     steps:
-    - name: Чекaут кода
-      uses: actions/checkout@v3
-      with:
-        persist-credentials: true
-        fetch-depth: 0
+    # Обновлено до v4, чтобы работать на свежем Node.js
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-    - name: Установка Python
-      uses: actions/setup-python@v4
+    # Обновлено до v5
+    - name: Set up Python
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
 
-    - name: Установка зависимостей
+    - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install python-telegram-bot
 
-    - name: Запуск Telegram Ботa
-      run: python bot.py
+    - name: Run Bot
+      run: |
+        python bot.py
