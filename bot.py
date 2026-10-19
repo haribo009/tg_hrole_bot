@@ -2,11 +2,10 @@ import json
 import logging
 import os
 import subprocess
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
-    CallbackQueryHandler,
     MessageHandler,
     filters,
     ContextTypes,
@@ -60,8 +59,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Как пользоваться:</b>\n"
         "• <code>/setrole НазваниеРоли</code> — получить роль (напр. <code>/setrole отгрузка</code>)\n"
         "• <code>/delrole НазваниеРоли</code> — снять роль\n"
-        "• <code>/roles</code> — меню вызова кнопками\n"
-        "• <b>Вызов через @:</b> начни сообщение с символа @ и названия роли, например: <code>@отгрузка деталь такая-то, денег столько</code>"
+        "• <code>/roles</code> — посмотреть список всех ролей в группе\n"
+        "• <code>/myroles</code> — посмотреть свои роли\n\n"
+        "🔥 <b>Вызов:</b> просто начни сообщение с точки и названия роли, например:\n"
+        "<code>.отгрузка деталь такая-то, денег столько</code>"
     )
 
 async def set_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -129,7 +130,8 @@ async def my_roles(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.effective_chat.send_message("У тебя пока нет назначенных ролей.")
 
-async def show_roles_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Вывод списка всех существующих ролей в группе простым сообщением
+async def list_roles(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await update.message.delete()
     except Exception:
@@ -139,27 +141,23 @@ async def show_roles_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_chat.send_message("В группе пока нет созданных ролей!")
         return
 
-    keyboard = []
-    for role in user_roles.keys():
-        keyboard.append([InlineKeyboardButton(f"📣 Позвать: {role}", callback_data=f"call_{role}")])
+    roles_list = "\n• ".join(user_roles.keys())
+    await update.effective_chat.send_message(f"📋 <b>Список всех ролей в группе:</b>\n• {roles_list}", parse_mode="HTML")
 
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.effective_chat.send_message("Выбери роль для вызова:", reply_markup=reply_markup)
-
-# Перехват сообщений, начинающихся с @
-async def handle_at_call(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Перехват сообщений, начинающихся с точки (.)
+async def handle_dot_call(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
 
     text = update.message.text.strip()
     
-    # Проверяем, начинается ли сообщение с символа @
-    if not text.startswith("@"):
+    # Проверяем, начинается ли сообщение с точки .
+    if not text.startswith("."):
         return
 
-    # Убираем символ @ и разбиваем на роль и текст
-    text_without_at = text[1:]
-    text_parts = text_without_at.split(maxsplit=1)
+    # Убираем точку и разбиваем на роль и текст
+    text_without_dot = text[1:]
+    text_parts = text_without_dot.split(maxsplit=1)
     
     if not text_parts:
         return
@@ -172,7 +170,7 @@ async def handle_at_call(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not users:
             return
 
-        # Удаляем исходное сообщение с символом @
+        # Удаляем исходное сообщение с точкой
         try:
             await update.message.delete()
         except Exception:
@@ -190,29 +188,6 @@ async def handle_at_call(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Отправляем красивый вызов в чат
         await update.effective_chat.send_message(response_text, parse_mode="HTML")
 
-async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    data = query.data
-    if data.startswith("call_"):
-        role = data.replace("call_", "")
-        users = user_roles.get(role, set())
-
-        try:
-            await query.message.delete()
-        except Exception:
-            pass
-
-        if not users:
-            await query.effective_chat.send_message(f"В роли <b>{role}</b> никого нет.", parse_mode="HTML")
-            return
-
-        mentions = [user_names[uid] for uid in users if uid in user_names]
-        text = f"🔔 <b>Вызов участников с ролью [{role}]:</b>\n\n" + " ".join(mentions)
-        
-        await query.effective_chat.send_message(text, parse_mode="HTML")
-
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TOKEN).build()
 
@@ -220,10 +195,9 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("setrole", set_role))
     app.add_handler(CommandHandler("delrole", del_role))
     app.add_handler(CommandHandler("myroles", my_roles))
-    app.add_handler(CommandHandler("roles", show_roles_menu))
-    app.add_handler(CallbackQueryHandler(button_click))
+    app.add_handler(CommandHandler("roles", list_roles))
     
-    # Ловит сообщения, начинающиеся с @
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_at_call))
+    # Ловит сообщения, начинающиеся с точки (.)
+    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_dot_call))
 
     app.run_polling()
