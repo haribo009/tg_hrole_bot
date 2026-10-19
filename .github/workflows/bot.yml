@@ -4,17 +4,23 @@ on:
   push:
     branches: [ "main", "master" ]
   schedule:
-    # Перезапускает бота каждые 5 часов, чтобы процесс не засыпал
     - cron: '0 */5 * * *'
-  workflow_dispatch: # Позволяет запускать вручную кнопкой
+  workflow_dispatch:
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    
+    # ВАЖНО: Добавляем права на запись в репозиторий
+    permissions:
+      contents: write
 
     steps:
     - name: Чекaут кода
       uses: actions/checkout@v3
+      with:
+        persist-credentials: true
+        fetch-depth: 0
 
     - name: Установка Python
       uses: actions/setup-python@v4
