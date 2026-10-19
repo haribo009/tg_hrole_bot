@@ -14,45 +14,14 @@ from telegram.ext import (
 # Render умеет считывать токен из переменных окружения, но для простоты можешь вписать сюда:
 TOKEN = "8826570127:AAHaZAxmoqocst8EdpPKOpWcV1-MO_gNfAg"
 
-DATA_FILE = "roles_data.json"
+# Хранилище ролей и имен
+user_roles = {}
+user_names = {}
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
-
-def load_data():
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                user_roles = {role: set(u_ids) for role, u_ids in data.get("user_roles", {}).items()}
-                user_names = {int(uid): name for uid, name in data.get("user_names", {}).items()}
-                return user_roles, user_names
-        except Exception as e:
-            logging.error(f"Ошибка загрузки файла: {e}")
-    return {}, {}
-
-def save_data():
-    try:
-        data = {
-            "user_roles": {role: list(u_ids) for role, u_ids in user_roles.items()},
-            "user_names": {str(uid): name for uid, name in user_names.items()}
-        }
-        with open(DATA_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-            
-        subprocess.run(["git", "config", "--global", "user.name", "RoleBot"], capture_output=True)
-        subprocess.run(["git", "config", "--global", "user.email", "bot@action.github.com"], capture_output=True)
-        subprocess.run(["git", "add", DATA_FILE], capture_output=True)
-        subprocess.run(["git", "commit", "-m", "Auto-update roles data [skip ci]"], capture_output=True)
-        push_result = subprocess.run(["git", "push"], capture_output=True, text=True)
-        logging.info(f"Git push result: {push_result.stdout}")
-        
-    except Exception as e:
-        logging.error(f"Ошибка сохранения/пуша данных: {e}")
-
-user_roles, user_names = load_data()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_html(
@@ -60,8 +29,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Команды:</b>\n"
         "• <code>/setrole Роль</code> — получить роль (напр. <code>/setrole Дизайнер</code>)\n"
         "• <code>/delrole Роль</code> — снять роль\n"
-        "• <code>/call Роль</code> — позвать всех с этой ролью (напр. <code>/call Дизайнер</code>)\n"
-        "• <code>/roles</code> — список всех существующих ролей\n"
+        "• <code>/roles</code> — меню для вызова роли\n"
         "• <code>/myroles</code> — твои роли"
     )
 
@@ -78,16 +46,17 @@ async def set_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_roles[role].add(user.id)
     
+    # Сохраняем кликабельное упоминание
     if user.username:
         tag_name = f"@{user.username}"
     else:
+        # Безопасный HTML-тег по ID для пользователей без юзернейма
         first_name = user.first_name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         tag_name = f'<a href="tg://user?id={user.id}">{first_name}</a>'
         
     user_names[user.id] = tag_name
-    save_data()
 
-    await update.message.reply_html(f"✅ Роль <b>{role}</b> успешно закреплена за тобой!")
+    await update.message.reply_html(f"✅ Ты успешно получил(а) роль: <b>{role}</b>")
 
 async def del_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -101,7 +70,6 @@ async def del_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_roles[role].remove(user.id)
         if not user_roles[role]:
             del user_roles[role]
-        save_data()
         await update.message.reply_html(f"❌ Роль <b>{role}</b> снята.")
     else:
         await update.message.reply_html(f"У тебя нет роли <b>{role}</b>.")
@@ -116,34 +84,36 @@ async def my_roles(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("У тебя пока нет назначенных ролей.")
 
-async def list_roles(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def show_roles_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user_roles:
         await update.message.reply_text("В группе пока нет созданных ролей!")
         return
 
-    roles_list = "\n• ".join(user_roles.keys())
-    await update.message.reply_html(f"📋 <b>Существующие роли в группе:</b>\n• {roles_list}\n\n<i>Для вызова используй: /call НазваниеРоли</i>")
+    keyboard = []
+    for role in user_roles.keys():
+        keyboard.append([InlineKeyboardButton(f"📣 Позвать: {role}", callback_data=f"call_{role}")])
 
-async def call_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_html("Укажи роль для вызова! Пример: <code>/call Дизайнер</code>")
-        return
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("Выбери роль, которую нужно отметить:", reply_markup=reply_markup)
 
-    role = " ".join(context.args).strip()
-    users = user_roles.get(role, set())
+async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
 
-    if not users:
-        await update.message.reply_html(f"В роли <b>{role}</b> никого нет или такой роли не существует.")
-        return
+    data = query.data
+    if data.startswith("call_"):
+        role = data.replace("call_", "")
+        users = user_roles.get(role, set())
 
-    mentions = [user_names[uid] for uid in users if uid in user_names]
-    
-    if not mentions:
-        await update.message.reply_html(f"Не удалось найти список людей для роли <b>{role}</b>.")
-        return
+        if not users:
+            await query.edit_message_text(f"В роли {role} никого нет.")
+            return
 
-    text = f"🔔 <b>Вызов участников с ролью [{role}]:</b>\n\n" + " ".join(mentions)
-    await update.message.reply_html(text)
+        mentions = [user_names[uid] for uid in users if uid in user_names]
+        text = f"🔔 <b>Вызов участников с ролью [{role}]:</b>\n\n" + " ".join(mentions)
+        
+        # Отправляем сообщение с поддержкой HTML (теги будут активны)
+        await query.message.reply_html(text)
 
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TOKEN).build()
@@ -152,7 +122,7 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("setrole", set_role))
     app.add_handler(CommandHandler("delrole", del_role))
     app.add_handler(CommandHandler("myroles", my_roles))
-    app.add_handler(CommandHandler("roles", list_roles))
-    app.add_handler(CommandHandler("call", call_role))
+    app.add_handler(CommandHandler("roles", show_roles_menu))
+    app.add_handler(CallbackQueryHandler(button_click))
 
     app.run_polling()
