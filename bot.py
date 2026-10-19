@@ -59,10 +59,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Как пользоваться:</b>\n"
         "• <code>/setrole НазваниеРоли</code> — получить роль (напр. <code>/setrole отгрузка</code>)\n"
         "• <code>/delrole НазваниеРоли</code> — снять роль\n"
-        "• <code>/roles</code> — посмотреть список всех ролей в группе\n"
+        "• <code>/roles</code> — посмотреть список всех ролей\n"
         "• <code>/myroles</code> — посмотреть свои роли\n\n"
-        "🔥 <b>Вызов:</b> просто начни сообщение с точки и названия роли, например:\n"
-        "<code>.отгрузка деталь такая-то, денег столько</code>"
+        "🔥 <b>Вызов:</b> просто напиши слэш и название роли, а дальше твой текст, например:\n"
+        "<code>/отгрузка деталь такая-то, денег столько</code>"
     )
 
 async def set_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -130,7 +130,6 @@ async def my_roles(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.effective_chat.send_message("У тебя пока нет назначенных ролей.")
 
-# Вывод списка всех существующих ролей в группе простым сообщением
 async def list_roles(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await update.message.delete()
@@ -144,48 +143,42 @@ async def list_roles(update: Update, context: ContextTypes.DEFAULT_TYPE):
     roles_list = "\n• ".join(user_roles.keys())
     await update.effective_chat.send_message(f"📋 <b>Список всех ролей в группе:</b>\n• {roles_list}", parse_mode="HTML")
 
-# Перехват сообщений, начинающихся с точки (.)
-async def handle_dot_call(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Универсальный перехват любых команд через слэш (например /отгрузка, /дизайнер и т.д.)
+async def handle_slash_call(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
 
     text = update.message.text.strip()
-    
-    # Проверяем, начинается ли сообщение с точки .
-    if not text.startswith("."):
+    if not text.startswith("/"):
         return
 
-    # Убираем точку и разбиваем на роль и текст
-    text_without_dot = text[1:]
-    text_parts = text_without_dot.split(maxsplit=1)
-    
-    if not text_parts:
+    # Убираем слэш и разделяем команду и текст
+    # Например: "/отгрузка деталь такая" превратится в команду "отгрузка" и текст "деталь такая"
+    command_parts = text[1:].split(maxsplit=1)
+    if not command_parts:
         return
 
-    potential_role = text_parts[0].lower()
+    potential_role = command_parts[0].lower()
 
-    # Проверяем, существует ли такая роль
+    # Проверяем, есть ли такая роль в нашей базе
     if potential_role in user_roles:
         users = user_roles[potential_role]
         if not users:
             return
 
-        # Удаляем исходное сообщение с точкой
+        # Удаляем сообщение пользователя с вызовом
         try:
             await update.message.delete()
         except Exception:
             pass
 
         mentions = [user_names[uid] for uid in users if uid in user_names]
-        
-        # Текст после названия роли
-        custom_text = text_parts[1] if len(text_parts) > 1 else ""
+        custom_text = command_parts[1] if len(command_parts) > 1 else ""
 
         response_text = f"🔔 <b>Вызов участников с ролью [{potential_role}]:</b>\n" + " ".join(mentions)
         if custom_text:
             response_text += f"\n\n💬 <b>Сообщение:</b> {custom_text}"
 
-        # Отправляем красивый вызов в чат
         await update.effective_chat.send_message(response_text, parse_mode="HTML")
 
 if __name__ == '__main__':
@@ -197,7 +190,7 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("myroles", my_roles))
     app.add_handler(CommandHandler("roles", list_roles))
     
-    # Ловит сообщения, начинающиеся с точки (.)
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_dot_call))
+    # Перехватывает любые команды через слэш и проверяет их по списку ролей
+    app.add_handler(MessageHandler(filters.COMMAND, handle_slash_call))
 
     app.run_polling()
