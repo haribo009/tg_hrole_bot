@@ -1,4 +1,3 @@
-async def quick_call_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 import asyncio
 import json
 import logging
