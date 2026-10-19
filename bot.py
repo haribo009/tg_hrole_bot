@@ -1,7 +1,9 @@
+async def quick_call_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 import asyncio
 import json
 import logging
 import os
+import subprocess
 from telegram import (
     Update,
     InlineQueryResultArticle,
@@ -36,7 +38,7 @@ def load_data():
             logging.error(f"Ошибка загрузки файла данных: {e}")
     return {}, {}
 
-def save_data():
+def save_and_push_data():
     try:
         data = {
             "user_roles": {role: list(u_ids) for role, u_ids in user_roles.items()},
@@ -44,8 +46,16 @@ def save_data():
         }
         with open(DATA_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+            
+        # Автоматически отправляем обновленный json на GitHub, чтобы данные не терялись
+        subprocess.run(["git", "config", "--global", "user.name", "RoleBot"], capture_output=True)
+        subprocess.run(["git", "config", "--global", "user.email", "bot@action.github.com"], capture_output=True)
+        subprocess.run(["git", "add", DATA_FILE], capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Auto-update roles data [skip ci]"], capture_output=True)
+        subprocess.run(["git", "pull", "--rebase"], capture_output=True)
+        subprocess.run(["git", "push"], capture_output=True)
     except Exception as e:
-        logging.error(f"Ошибка сохранения файла данных: {e}")
+        logging.error(f"Ошибка сохранения/пуша данных: {e}")
 
 user_roles, user_names = load_data()
 
@@ -58,14 +68,15 @@ async def delete_later(message, delay=4):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_html(
-        "Привет! Бот настроен.\n\n"
+        "Привет! Бот настроен, данные ролей сохраняются в репозиторий.\n\n"
         "<b>Команды:</b>\n"
         "• <code>/setrole отгрузка</code> — получить роль\n"
         "• <code>/delrole отгрузка</code> — снять роль\n"
         "• <code>/roles</code> — список всех ролей\n"
         "• <code>/myroles</code> — твои роли\n\n"
-        "⚡️ <b>Как вызывать через меню (Инлайн-режим):</b>\n"
-        "Напиши в чате <code>@ИмяТвоегоБота</code> и появится список ролей для выбора!"
+        "⚡️ <b>Как вызывать:</b>\n"
+        "1. Пиши прямо в чат: <code>@отгр текст сообщения</code> (бот поймет по префиксу).\n"
+        "2. Или напиши <code>@ИмяБота</code>, чтобы выбрать роль из меню (подставится шаблон для текста)."
     )
 
 async def set_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -94,7 +105,7 @@ async def set_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tag_name = f'<a href="tg://user?id={user.id}">{first_name}</a>'
         
     user_names[user.id] = tag_name
-    save_data()
+    save_and_push_data()
 
     msg = await update.effective_chat.send_message(f"✅ Роль <b>{role}</b> закреплена за тобой!", parse_mode="HTML")
     asyncio.create_task(delete_later(msg, 4))
@@ -117,7 +128,7 @@ async def del_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_roles[role].remove(user.id)
         if not user_roles[role]:
             del user_roles[role]
-        save_data()
+        save_and_push_data()
         msg = await update.effective_chat.send_message(f"❌ Роль <b>{role}</b> успешно снята с тебя.", parse_mode="HTML")
     else:
         msg = await update.effective_chat.send_message(f"У тебя нет роли <b>{role}</b> или она уже удалена.", parse_mode="HTML")
@@ -156,13 +167,12 @@ async def list_roles(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.effective_chat.send_message(f"📋 <b>Роли в группе:</b>\n• {roles_list}", parse_mode="HTML")
     asyncio.create_task(delete_later(msg, 8))
 
-# ОБРАБОТЧИК ИНЛАЙН-МЕНЮ (Когда пишут @ИмяБота)
+# ИНЛАЙН-МЕНЮ: при выборе подставляет шаблон с текстом в поле ввода
 async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.inline_query.query.strip().lower()
     results = []
 
     for role, users in user_roles.items():
-        # Если пользователь что-то вводит после имени бота, фильтруем роли
         if query and query not in role:
             continue
 
@@ -170,25 +180,23 @@ async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         if not valid_users:
             continue
 
-        mentions = [user_names[uid] for uid in valid_users]
-        mentions_str = " ".join(mentions)
-
-        response_text = f"🔔 <b>Вызов участников с ролью [{role}]:</b>\n{mentions_str}"
+        # Шаблон: подставляет в чат строку вида "@отгрузка [впиши текст сюда]" для удобного редактирования
+        template_text = f"@{role} [впиши текст сюда]"
 
         results.append(
             InlineQueryResultArticle(
                 id=role,
-                title=f"Роль: {role}",
-                description=f"Участников: {len(valid_users)}",
+                title=f"Вызвать роль: {role}",
+                description=f"Участников: {len(valid_users)} (подставит шаблон для текста)",
                 input_message_content=InputTextMessageContent(
-                    response_text, parse_mode="HTML"
+                    template_text
                 )
             )
         )
 
     await update.inline_query.answer(results, cache_time=1)
 
-# Обычный текстовый вызов через @роль (как мы делали до этого)
+# БЫСТРЫЙ ВЫЗОВ ЧЕРЕЗ @ (с частичным совпадением роли и поддержкой текста)
 async def quick_call_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
@@ -202,16 +210,28 @@ async def quick_call_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not parts:
         return
 
-    role = parts[0].lower()
+    typed_role = parts[0].lower()
     custom_text = parts[1] if len(parts) > 1 else ""
 
-    users = user_roles.get(role, set())
+    matched_role = None
+    if typed_role in user_roles:
+        matched_role = typed_role
+    else:
+        for existing_role in user_roles.keys():
+            if existing_role.startswith(typed_role):
+                matched_role = existing_role
+                break
+
+    if not matched_role:
+        return
+
+    users = user_roles.get(matched_role, set())
     if not users:
         return
 
     mentions = [user_names[uid] for uid in users if uid in user_names]
     
-    response_text = f"🔔 <b>Вызов участников с ролью [{role}]:</b>\n" + " ".join(mentions)
+    response_text = f"🔔 <b>Вызов участников с ролью [{matched_role}]:</b>\n" + " ".join(mentions)
     if custom_text:
         response_text += f"\n\n💬 <b>Сообщение:</b> {custom_text}"
 
@@ -226,7 +246,6 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("myroles", my_roles))
     app.add_handler(CommandHandler("roles", list_roles))
     
-    # Подключаем инлайн-меню и быстрый вызов через @
     app.add_handler(InlineQueryHandler(inline_query_handler))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), quick_call_handler))
 
