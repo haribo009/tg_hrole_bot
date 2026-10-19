@@ -6,13 +6,10 @@ from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
-    MessageHandler,
-    filters,
     ContextTypes,
 )
 
 TOKEN = "8826570127:AAHaZAxmoqocst8EdpPKOpWcV1-MO_gNfAg"
-
 DATA_FILE = "roles_data.json"
 
 logging.basicConfig(
@@ -47,7 +44,6 @@ def save_data():
         subprocess.run(["git", "commit", "-m", "Auto-update roles data [skip ci]"], capture_output=True)
         subprocess.run(["git", "pull", "--rebase"], capture_output=True)
         subprocess.run(["git", "push"], capture_output=True)
-        
     except Exception as e:
         logging.error(f"Ошибка сохранения/пуша данных: {e}")
 
@@ -55,14 +51,10 @@ user_roles, user_names = load_data()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_html(
-        "Привет! Я бот для вызова ролей.\n\n"
-        "<b>Как пользоваться:</b>\n"
-        "• <code>/setrole НазваниеРоли</code> — получить роль (напр. <code>/setrole отгрузка</code>)\n"
-        "• <code>/delrole НазваниеРоли</code> — снять роль\n"
-        "• <code>/roles</code> — посмотреть список всех ролей\n"
-        "• <code>/myroles</code> — посмотреть свои роли\n\n"
-        "🔥 <b>Вызов:</b> начни сообщение с восклицательного знака и названия роли, например:\n"
-        "<code>!отгрузка деталь такая-то, денег столько</code>"
+        "Привет! Бот настроен и готов к работе.\n\n"
+        "⚡️ <b>Быстрый вызов:</b>\n"
+        "Просто напиши в чат: <code>/call [роль] [твой текст]</code>\n"
+        "Пример: <code>/call отгрузка срочно проверьте деталь</code>"
     )
 
 async def set_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -92,7 +84,8 @@ async def set_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_names[user.id] = tag_name
     save_data()
 
-    await update.effective_chat.send_message(f"✅ Роль <b>{role}</b> успешно закреплена за тобой!", parse_mode="HTML")
+    msg = await update.effective_chat.send_message(f"✅ Роль <b>{role}</b> закреплена за тобой!", parse_mode="HTML")
+    await asyncio_delete(msg)
 
 async def del_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -101,7 +94,6 @@ async def del_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
     if not context.args:
-        await update.effective_chat.send_message("Укажи название роли! Пример: <code>/delrole отгрузка</code>", parse_mode="HTML")
         return
 
     role = " ".join(context.args).strip().lower()
@@ -112,9 +104,6 @@ async def del_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not user_roles[role]:
             del user_roles[role]
         save_data()
-        await update.effective_chat.send_message(f"❌ Роль <b>{role}</b> снята.", parse_mode="HTML")
-    else:
-        await update.effective_chat.send_message(f"У тебя нет роли <b>{role}</b>.", parse_mode="HTML")
 
 async def my_roles(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -123,12 +112,23 @@ async def my_roles(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
     my_list = [role for role, users in user_roles.items() if update.effective_user.id in users]
-    
     if my_list:
         roles_str = "\n• " + "\n• ".join(my_list)
-        await update.effective_chat.send_message(f"Твои роли:{roles_str}")
+        msg = await update.effective_chat.send_message(f"Твои роли:{roles_str}")
     else:
-        await update.effective_chat.send_message("У тебя пока нет назначенных ролей.")
+        msg = await update.effective_chat.send_message("У тебя нет ролей.")
+    
+    # Автоудаление через 4 сек
+    import asyncio
+    asyncio.create_task(delete_later(msg, 4))
+
+async def delete_later(message, delay=4):
+    import asyncio
+    await asyncio.sleep(delay)
+    try:
+        await message.delete()
+    except Exception:
+        pass
 
 async def list_roles(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -137,53 +137,40 @@ async def list_roles(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
     if not user_roles:
-        await update.effective_chat.send_message("В группе пока нет созданных ролей!")
+        msg = await update.effective_chat.send_message("Ролей пока нет.")
+        import asyncio
+        asyncio.create_task(delete_later(msg, 3))
         return
 
     roles_list = "\n• ".join(user_roles.keys())
-    await update.effective_chat.send_message(f"📋 <b>Список всех ролей в группе:</b>\n• {roles_list}", parse_mode="HTML")
+    msg = await update.effective_chat.send_message(f"📋 <b>Роли в группе:</b>\n• {roles_list}", parse_mode="HTML")
+    import asyncio
+    asyncio.create_task(delete_later(msg, 6))
 
-# Перехват сообщений, начинающихся с восклицательного знака (!)
-async def handle_exclamation_call(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.message.text:
+# Быстрый вызов через /call
+async def call_role_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    if not context.args:
         return
 
-    text = update.message.text.strip()
+    role = context.args[0].strip().lower()
+    custom_text = " ".join(context.args[1:]).strip()
+
+    users = user_roles.get(role, set())
+    if not users:
+        return
+
+    mentions = [user_names[uid] for uid in users if uid in user_names]
     
-    # Проверяем, начинается ли сообщение с !
-    if not text.startswith("!"):
-        return
+    response_text = f"🔔 <b>Вызов [{role}]:</b>\n" + " ".join(mentions)
+    if custom_text:
+        response_text += f"\n\n💬 {custom_text}"
 
-    # Убираем восклицательный знак и разделяем роль и текст
-    # Например "!отгрузка деталь такая" -> роль "отгрузка", текст "деталь такая"
-    text_without_excl = text[1:]
-    text_parts = text_without_excl.split(maxsplit=1)
-    
-    if not text_parts:
-        return
-
-    potential_role = text_parts[0].lower()
-
-    # Проверяем, есть ли такая роль в нашей базе данных
-    if potential_role in user_roles:
-        users = user_roles[potential_role]
-        if not users:
-            return
-
-        # Удаляем сообщение пользователя
-        try:
-            await update.message.delete()
-        except Exception:
-            pass
-
-        mentions = [user_names[uid] for uid in users if uid in user_names]
-        custom_text = text_parts[1] if len(text_parts) > 1 else ""
-
-        response_text = f"🔔 <b>Вызов участников с ролью [{potential_role}]:</b>\n" + " ".join(mentions)
-        if custom_text:
-            response_text += f"\n\n💬 <b>Сообщение:</b> {custom_text}"
-
-        await update.effective_chat.send_message(response_text, parse_mode="HTML")
+    await update.effective_chat.send_message(response_text, parse_mode="HTML")
 
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TOKEN).build()
@@ -193,8 +180,6 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("delrole", del_role))
     app.add_handler(CommandHandler("myroles", my_roles))
     app.add_handler(CommandHandler("roles", list_roles))
-    
-    # Перехватывает любые сообщения, начинающиеся с !
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_exclamation_call))
+    app.add_handler(CommandHandler("call", call_role_command))
 
     app.run_polling()
