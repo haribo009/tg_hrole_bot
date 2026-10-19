@@ -46,13 +46,18 @@ def save_and_push_data():
         with open(DATA_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
             
-        # Автоматически отправляем обновленный json на GitHub, чтобы данные не терялись
-        subprocess.run(["git", "config", "--global", "user.name", "RoleBot"], capture_output=True)
-        subprocess.run(["git", "config", "--global", "user.email", "bot@action.github.com"], capture_output=True)
+        # Настройка Git и запуск коммита
+        subprocess.run(["git", "config", "user.name", "github-actions[bot]"], capture_output=True)
+        subprocess.run(["git", "config", "user.email", "github-actions[bot]@users.noreply.github.com"], capture_output=True)
         subprocess.run(["git", "add", DATA_FILE], capture_output=True)
-        subprocess.run(["git", "commit", "-m", "Auto-update roles data [skip ci]"], capture_output=True)
-        subprocess.run(["git", "pull", "--rebase"], capture_output=True)
-        subprocess.run(["git", "push"], capture_output=True)
+        
+        # Проверяем, есть ли измененные файлы перед коммитом
+        status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
+        if status.stdout.strip():
+            subprocess.run(["git", "commit", "-m", "Auto-update roles data [skip ci]"], capture_output=True)
+            subprocess.run(["git", "pull", "--rebase"], capture_output=True)
+            subprocess.run(["git", "push"], capture_output=True)
+            logging.info("Файл roles_data.json успешно сохранен и отправлен на GitHub!")
     except Exception as e:
         logging.error(f"Ошибка сохранения/пуша данных: {e}")
 
