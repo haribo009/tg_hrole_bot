@@ -42,7 +42,6 @@ def save_data():
         with open(DATA_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
             
-        # Автоматический коммит и пуш в Git, чтобы роли сохранялись навсегда
         subprocess.run(["git", "config", "--global", "user.name", "RoleBot"], capture_output=True)
         subprocess.run(["git", "config", "--global", "user.email", "bot@action.github.com"], capture_output=True)
         subprocess.run(["git", "add", DATA_FILE], capture_output=True)
@@ -55,28 +54,21 @@ def save_data():
 
 user_roles, user_names = load_data()
 
-async def delete_later(message, delay=3):
-    await asyncio.sleep(delay)
-    try:
-        await message.delete()
-    except Exception:
-        pass
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_html(
         "Привет! Я бот для вызова ролей.\n\n"
         "<b>Команды:</b>\n"
-        "• <code>/setrole Роль</code> — получить роль\n"
+        "• <code>/setrole Роль</code> — получить роль (напр. <code>/setrole Дизайнер</code>)\n"
         "• <code>/delrole Роль</code> — снять роль\n"
-        "• <code>/roles</code> — меню вызова роли\n"
+        "• <code>/call Роль</code> — позвать всех с этой ролью (напр. <code>/call Дизайнер</code>)\n"
+        "• <code>/roles</code> — список всех существующих ролей\n"
         "• <code>/myroles</code> — твои роли"
     )
 
 async def set_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not context.args:
-        msg = await update.message.reply_html("Укажи название роли! Пример: <code>/setrole Дизайнер</code>")
-        asyncio.create_task(delete_later(msg, 4))
+        await update.message.reply_html("Укажи название роли! Пример: <code>/setrole Дизайнер</code>")
         return
 
     role = " ".join(context.args).strip()
@@ -93,16 +85,14 @@ async def set_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tag_name = f'<a href="tg://user?id={user.id}">{first_name}</a>'
         
     user_names[user.id] = tag_name
-    save_data() # Сохранит локально и сразу отправит в Git!
+    save_data()
 
-    msg = await update.message.reply_html(f"✅ Роль <b>{role}</b> успешно закреплена за тобой!")
-    asyncio.create_task(delete_later(msg, 3))
+    await update.message.reply_html(f"✅ Роль <b>{role}</b> успешно закреплена за тобой!")
 
 async def del_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not context.args:
-        msg = await update.message.reply_html("Укажи название роли! Пример: <code>/delrole Дизайнер</code>")
-        asyncio.create_task(delete_later(msg, 4))
+        await update.message.reply_html("Укажи название роли! Пример: <code>/delrole Дизайнер</code>")
         return
 
     role = " ".join(context.args).strip()
@@ -111,12 +101,10 @@ async def del_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_roles[role].remove(user.id)
         if not user_roles[role]:
             del user_roles[role]
-        save_data() # Обновит и запушит в Git
-        msg = await update.message.reply_html(f"❌ Роль <b>{role}</b> снята.")
+        save_data()
+        await update.message.reply_html(f"❌ Роль <b>{role}</b> снята.")
     else:
-        msg = await update.message.reply_html(f"У тебя нет роли <b>{role}</b>.")
-    
-    asyncio.create_task(delete_later(msg, 3))
+        await update.message.reply_html(f"У тебя нет роли <b>{role}</b>.")
 
 async def my_roles(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -124,58 +112,38 @@ async def my_roles(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if my_list:
         roles_str = "\n• " + "\n• ".join(my_list)
-        msg = await update.message.reply_text(f"Твои роли:{roles_str}")
+        await update.message.reply_text(f"Твои роли:{roles_str}")
     else:
-        msg = await update.message.reply_text("У тебя пока нет назначенных ролей.")
-    
-    asyncio.create_task(delete_later(msg, 4))
+        await update.message.reply_text("У тебя пока нет назначенных ролей.")
 
-async def show_roles_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        await update.message.delete()
-    except Exception:
-        pass
-
+async def list_roles(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user_roles:
-        msg = await update.effective_chat.send_message("В группе пока нет созданных ролей!")
-        asyncio.create_task(delete_later(msg, 3))
+        await update.message.reply_text("В группе пока нет созданных ролей!")
         return
 
-    keyboard = []
-    for role in user_roles.keys():
-        keyboard.append([InlineKeyboardButton(f"📣 Позвать: {role}", callback_data=f"call_{role}")])
+    roles_list = "\n• ".join(user_roles.keys())
+    await update.message.reply_html(f"📋 <b>Существующие роли в группе:</b>\n• {roles_list}\n\n<i>Для вызова используй: /call НазваниеРоли</i>")
 
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.effective_chat.send_message("Выбери роль для вызова:", reply_markup=reply_markup)
+async def call_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_html("Укажи роль для вызова! Пример: <code>/call Дизайнер</code>")
+        return
 
-async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
+    role = " ".join(context.args).strip()
+    users = user_roles.get(role, set())
 
-    data = query.data
-    if data.startswith("call_"):
-        role = data.replace("call_", "")
-        users = user_roles.get(role, set())
+    if not users:
+        await update.message.reply_html(f"В роли <b>{role}</b> никого нет или такой роли не существует.")
+        return
 
-        if not users:
-            msg = await query.effective_chat.send_message(f"В роли <b>{role}</b> никого нет.", parse_mode="HTML")                asyncio.create_task(delete_later(msg, 3))
-            return
+    mentions = [user_names[uid] for uid in users if uid in user_names]
+    
+    if not mentions:
+        await update.message.reply_html(f"Не удалось найти список людей для роли <b>{role}</b>.")
+        return
 
-        mentions = [user_names[uid] for uid in users if uid in user_names]
-        
-        if not mentions:
-            msg = await query.effective_chat.send_message(f"Не удалось найти список людей для роли <b>{role}</b>.", parse_mode="HTML")
-            asyncio.create_task(delete_later(msg, 3))
-            return
-
-        text = f"🔔 <b>Вызов участников с ролью [{role}]:</b>\n\n" + " ".join(mentions)
-        
-        await query.effective_chat.send_message(text, parse_mode="HTML")
-
-        try:
-            await query.message.delete()
-        except Exception:
-            pass
+    text = f"🔔 <b>Вызов участников с ролью [{role}]:</b>\n\n" + " ".join(mentions)
+    await update.message.reply_html(text)
 
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TOKEN).build()
@@ -184,7 +152,7 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("setrole", set_role))
     app.add_handler(CommandHandler("delrole", del_role))
     app.add_handler(CommandHandler("myroles", my_roles))
-    app.add_handler(CommandHandler("roles", show_roles_menu))
-    app.add_handler(CallbackQueryHandler(button_click))
+    app.add_handler(CommandHandler("roles", list_roles))
+    app.add_handler(CommandHandler("call", call_role))
 
     app.run_polling()
